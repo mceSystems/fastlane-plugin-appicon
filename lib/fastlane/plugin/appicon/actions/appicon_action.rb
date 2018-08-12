@@ -6,13 +6,13 @@ module Fastlane
           iphone: {
             '2x' => ['20x20', '29x29', '40x40', '60x60'],
             '3x' => ['20x20', '29x29', '40x40', '60x60']
-		  },
-		   :ios_marketing => {
-            '1x' => ['1024x1024']
           },
           ipad: {
             '1x' => ['20x20', '29x29', '40x40', '76x76'],
             '2x' => ['20x20', '29x29', '40x40', '76x76', '83.5x83.5']
+          },
+          :ios_marketing => {
+            '1x' => ['1024x1024']
           }
         }
       end
@@ -25,33 +25,43 @@ module Fastlane
         require 'mini_magick'
         image = MiniMagick::Image.open(fname)
 
-        UI.user_error!("Minimum width of input image should be 1024") if image.width < 1024
-        UI.user_error!("Minimum height of input image should be 1024") if image.height < 1024
-        UI.user_error!("Input image should be square") if image.width != image.height
+        Helper::AppiconHelper.check_input_image_size(image, 1024)
 
+        # Convert image to png
+        image.format 'png'
+
+        # remove alpha channel
+        if params[:remove_alpha]
+          image.alpha 'remove'
+        end
+
+        # Create the base path
         FileUtils.mkdir_p(basepath)
 
         images = []
 
-        params[:appicon_devices].each do |device|
-          self.needed_icons[device].each do |scale, sizes|
-            sizes.each do |size|
-              width, height = size.split('x').map { |v| v.to_f * scale.to_i }
-              filename = "#{basename}-#{width.to_i}x#{height.to_i}.png"
+        icons = Helper::AppiconHelper.get_needed_icons(params[:appicon_devices], self.needed_icons, false)
+        icons.each do |icon|
+          width = icon['width']
+          height = icon['height']
+          filename = "#{basename}-#{width.to_i}x#{height.to_i}.png"
 
-              image = MiniMagick::Image.open(fname)
-              image.format 'png'
-              image.resize "#{width}x#{height}"
-              image.write basepath + filename
+          # downsize icon
+          image.resize "#{width}x#{height}"
 
-              images << {
-                'size' => size,
-                'idiom' => device,
-                'filename' => filename,
-                'scale' => scale
-              }
-            end
-          end
+          image.write basepath + filename
+
+          info = {
+            'size' => icon['size'],
+            'idiom' => icon['device'],
+            'filename' => filename,
+            'scale' => icon['scale']
+          }
+
+          info['role'] = icon['role'] unless icon['role'].nil?
+          info['subtype'] = icon['subtype'] unless icon['subtype'].nil?
+
+          images << info
         end
 
         contents = {
@@ -63,7 +73,7 @@ module Fastlane
         }
 
         require 'json'
-        File.write(File.join(basepath, 'Contents.json'), JSON.dump(contents))
+        File.write(File.join(basepath, 'Contents.json'), JSON.pretty_generate(contents))
         UI.success("Successfully stored app icon at '#{basepath}'")
       end
 
@@ -100,7 +110,13 @@ module Fastlane
                              default_value: 'AppIcon.appiconset',
                                description: "Name of the appiconset inside the asset catalogue",
                                   optional: true,
-                                      type: String)
+                                      type: String),
+          FastlaneCore::ConfigItem.new(key: :remove_alpha,
+                                  env_name: "REMOVE_ALPHA",
+                             default_value: false,
+                               description: "Remove the alpha channel from generated PNG",
+                                  optional: true,
+                                      type: Boolean)
         ]
       end
 
